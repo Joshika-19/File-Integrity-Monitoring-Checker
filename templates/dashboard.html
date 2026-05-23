@@ -1,128 +1,166 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title> File Integrity Monitoring Checker</title>
+{% extends 'base.html' %}
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+{% block content %}
 
-    <style>
-        body {
-            background: linear-gradient(135deg, #fbc2eb, #a6c1ee, #c2ffd8); /* pastel pink + blue + mint */
-            min-height: 100vh;
-            font-family: 'Segoe UI', sans-serif;
-        }
+<div class="main-container">
 
-        .card {
-            background: rgba(255, 255, 255, 0.85);
-            border-radius: 25px;
-            padding: 25px;
-            margin-top: 40px;
-            box-shadow: 0px 8px 25px rgba(0,0,0,0.1);
-        }
+    <!-- SIDEBAR -->
 
-        h2 {
-            color: #6a4c93; /* soft purple */
-            font-weight: bold;
-        }
+    <div class="sidebar">
 
-        .table {
-            background-color: #ffffff;
-            border-radius: 12px;
-            overflow: hidden;
-        }
+        <h2>FIM System</h2>
 
-        thead {
-            background: linear-gradient(90deg, #ffafcc, #bde0fe, #caffbf);
-            color: #333;
-        }
-
-        .safe {
-            color: #2ecc71;
-            font-weight: bold;
-        }
-
-        .modified {
-            color: #ff6b6b;
-            font-weight: bold;
-        }
-
-        .new {
-            color: #4dabf7;
-            font-weight: bold;
-        }
-
-        .btn-primary {
-            background: linear-gradient(90deg, #a6c1ee, #fbc2eb);
-            border: none;
-            border-radius: 25px;
-            color: #333;
-            font-weight: bold;
-            padding: 8px 20px;
-            transition: 0.3s;
-        }
-
-        .btn-primary:hover {
-            transform: scale(1.05);
-            opacity: 0.9;
-        }
-
-        .btn-danger {
-            border-radius: 25px;
-        }
-
-        input[type="file"] {
-            padding: 6px;
-            border-radius: 10px;
-        }
-    </style>
-</head>
-
-<body>
-
-<div class="container">
-    <div class="card">
-
-        <h2 class="text-center"> File Integrity Monitoring Checker</h2>
-
-        <!-- Upload -->
-        <form action="/upload" method="post" enctype="multipart/form-data" class="text-center mb-3">
-            <input type="file" name="file" required>
-            <button class="btn btn-primary">Upload</button>
-            <a href="/clear" class="btn btn-danger">Clear</a>
-        </form>
-
-        <!-- Table -->
-        <table class="table table-bordered text-center">
-            <tr>
-                <th>File</th>
-                <th>Status</th>
-                <th>Hash</th>
-                <th>Uploaded Time</th>
-                <th>Modified Time</th>
-            </tr>
-
-            {% for file, info in data.items() %}
-            <tr>
-                <td>{{ file }}</td>
-
-                <td class="
-                    {% if info.status == 'Safe' %}safe
-                    {% elif info.status == 'Modified' %}modified
-                    {% else %}new
-                    {% endif %}
-                ">
-                    {{ info.status }}
-                </td>
-
-                <td style="font-size:10px;">{{ info.hash }}</td>
-                <td>{{ info.upload_time }}</td>
-                <td>{{ info.modified_time }}</td>
-            </tr>
-            {% endfor %}
-        </table>
+        <a href="#">Dashboard</a>
+        <a href="/clear">Clear History</a>
+        <a href="/logout">Logout</a>
 
     </div>
+
+    <!-- MAIN CONTENT -->
+
+    <div class="content">
+
+        <!-- TOPBAR -->
+
+        <div class="topbar">
+
+            <div>
+                <h2>File Integrity Dashboard</h2>
+            </div>
+
+            <div class="user-box">
+                {{ email }}
+            </div>
+
+        </div>
+
+        <!-- SECURITY SCORE -->
+
+        <div class="score-card">
+
+            <h3>Security Score</h3>
+
+            {% if history|length > 0 %}
+
+                {% set latest = history[0][6] %}
+
+            {% else %}
+
+                {% set latest = 100 %}
+
+            {% endif %}
+
+            <div class="progress">
+
+                <div class="progress-bar"
+     data-width="{{ latest|default(100)|int }}">
+                    {{ latest }}%
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- FILE UPLOAD CARD -->
+
+        <div class="card">
+
+            <h3>Upload File</h3>
+
+            <form action="/upload" method="POST" enctype="multipart/form-data">
+
+                <input type="file" name="file" required>
+
+                <button type="submit">
+                    Upload
+                </button>
+
+            </form>
+
+        </div>
+
+        <!-- HISTORY TABLE -->
+
+        <div class="card">
+
+            <h3>Monitoring History</h3>
+
+            <table>
+
+                <tr>
+                    <th>File Name</th>
+                    <th>Upload Time</th>
+                    <th>Modified Time</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                    <th>Restore</th>
+                    <th>PDF</th>
+                </tr>
+
+                {% for row in history %}
+
+                <tr>
+
+                    <td>{{ row[1] }}</td>
+                    <td>{{ row[2] }}</td>
+                    <td>{{ row[3] }}</td>
+                    <td>
+
+                        {% if row[4] == "Modified" %}
+
+                            <span class="danger">
+                                {{ row[4] }}
+                            </span>
+
+                        {% else %}
+
+                            <span class="safe">
+                                {{ row[4] }}
+                            </span>
+
+                        {% endif %}
+
+                    </td>
+
+                    <td>{{ row[6] }}</td>
+
+                    <td>
+
+                        <a class="restore-btn"
+                           href="/restore/{{ row[1] }}">
+                            Restore
+                        </a>
+
+                    </td>
+
+                    <td>
+
+                        <a class="pdf-btn"
+                           href="/report/{{ row[0] }}">
+                            PDF
+                        </a>
+
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+            </table>
+
+        </div>
+
+    </div>
+
 </div>
 
-</body>
-</html>
+{% endblock %}
+<script>
+
+    const progressBar = document.querySelector(".progress-bar");
+
+    const width = progressBar.getAttribute("data-width");
+
+    progressBar.style.width = width + "%";
+
+</script>
