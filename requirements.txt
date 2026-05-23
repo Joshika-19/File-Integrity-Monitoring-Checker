@@ -1,2 +1,8 @@
-flask
-gunicorn
+Flask==2.2.5
+Flask-Dance
+Flask-Session
+Werkzeug
+reportlab
+pytz
+matplotlib
+gunicorn==21.2.0
