@@ -2,33 +2,45 @@ from flask import Flask, render_template, request, redirect, url_for, session, s
 from flask_session import Session
 from flask_dance.contrib.google import make_google_blueprint, google
 from werkzeug.utils import secure_filename
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics import renderPDF
-from reportlab.graphics.widgets.markers import makeMarker
-from reportlab.platypus.flowables import Flowable
+
+from dotenv import load_dotenv
+
 import sqlite3
 import os
 import hashlib
-import difflib
 import shutil
 import smtplib
+
 from email.mime.text import MIMEText
 from datetime import datetime
+
 import pytz
+
+# ================= LOAD ENV =================
+
+load_dotenv()
+
+# ================= APP =================
 
 app = Flask(__name__)
 
-app.secret_key = "SUPER_SECRET_KEY"
+app.secret_key = os.getenv("SECRET_KEY")
 
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
 
+# ================= FOLDERS =================
+
 UPLOAD_FOLDER = "uploads"
 ORIGINAL_FOLDER = "original_files"
 REPORT_FOLDER = "reports"
+
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(ORIGINAL_FOLDER, exist_ok=True)
@@ -39,8 +51,8 @@ os.makedirs(REPORT_FOLDER, exist_ok=True)
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 google_bp = make_google_blueprint(
-    client_id="681899477080-ot5p2hifd882k2gbg5nqtj8ff25glq67.apps.googleusercontent.com",
-    client_secret="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",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
     scope=[
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
@@ -54,6 +66,7 @@ app.register_blueprint(google_bp, url_prefix="/login")
 # ================= DATABASE =================
 
 def init_db():
+
     conn = sqlite3.connect("database.db")
     cur = conn.cursor()
 
@@ -80,16 +93,26 @@ init_db()
 # ================= TIME =================
 
 def indian_time():
+
     tz = pytz.timezone("Asia/Kolkata")
+
     return datetime.now(tz).strftime("%d-%m-%Y %H:%M:%S")
 
 # ================= HASH =================
 
 def sha256(filepath):
+
     h = hashlib.sha256()
 
     with open(filepath, "rb") as file:
-        while chunk := file.read(4096):
+
+        while True:
+
+            chunk = file.read(4096)
+
+            if not chunk:
+                break
+
             h.update(chunk)
 
     return h.hexdigest()
@@ -127,7 +150,8 @@ def detect_changes(old_file, new_file):
 # ================= SECURITY SCORE =================
 
 def security_score(changes):
-    count = len(changes.splitlines())
+
+    count = len(changes.split(","))
 
     if count == 0:
         return 100, "Low"
@@ -138,14 +162,14 @@ def security_score(changes):
     elif count <= 7:
         return 40, "High"
 
-    return 10, "High"
+    return 10, "Critical"
 
 # ================= EMAIL =================
 
 def send_email(receiver, filename, upload_time, modified_time):
 
-    sender = "joshikakavitha47@gmail.com"
-    password = "naoo sbyy xffv unlv"
+    sender = os.getenv("MAIL_USERNAME")
+    password = os.getenv("MAIL_PASSWORD")
 
     body = f"""
 Warning: File integrity violation detected
@@ -166,23 +190,35 @@ User: {receiver}
     msg["To"] = receiver
 
     try:
+
         server = smtplib.SMTP("smtp.gmail.com", 587)
+
         server.starttls()
+
         server.login(sender, password)
+
         server.sendmail(sender, receiver, msg.as_string())
+
         server.quit()
 
-    except Exception as e:
-        print(e)
+        print("Email sent successfully")
 
-# ================= ROUTES =================
+    except Exception as e:
+
+        print("Email Error:", str(e))
+
+# ================= HOME =================
 
 @app.route("/")
 def home():
+
     return render_template("login.html")
+
+# ================= GOOGLE LOGIN =================
 
 @app.route("/google_login")
 def google_login():
+
     if not google.authorized:
         return redirect(url_for("google.login"))
 
@@ -193,6 +229,8 @@ def google_login():
     session["email"] = info["email"]
 
     return redirect("/dashboard")
+
+# ================= DASHBOARD =================
 
 @app.route("/dashboard")
 def dashboard():
@@ -220,19 +258,38 @@ def dashboard():
 @app.route("/upload", methods=["POST"])
 def upload():
 
+    if "email" not in session:
+        return redirect("/")
+
     if "file" not in request.files:
+
+        flash("No file uploaded")
+
         return redirect("/dashboard")
 
     file = request.files["file"]
 
     if file.filename == "":
+
+        flash("No selected file")
+
         return redirect("/dashboard")
 
     filename = secure_filename(file.filename)
 
     upload_path = os.path.join(UPLOAD_FOLDER, filename)
 
-    file.save(upload_path)
+    try:
+
+        file.save(upload_path)
+
+    except Exception as e:
+
+        flash("File upload failed")
+
+        print("Upload Error:", str(e))
+
+        return redirect("/dashboard")
 
     current_hash = sha256(upload_path)
 
@@ -267,6 +324,8 @@ def upload():
             "No changes",
             session["email"]
         ))
+
+        flash("Original file uploaded successfully")
 
     else:
 
@@ -305,6 +364,8 @@ def upload():
                 session["email"]
             ))
 
+            flash("Modified file detected")
+
         else:
 
             cur.execute("""
@@ -323,10 +384,10 @@ def upload():
                 session["email"]
             ))
 
+            flash("File unchanged")
+
     conn.commit()
     conn.close()
-
-    flash("File uploaded successfully")
 
     return redirect("/dashboard")
 
@@ -361,7 +422,7 @@ def clear():
 
     return redirect("/dashboard")
 
-# ================= PDF =================
+# ================= PDF REPORT =================
 
 @app.route("/report/<int:file_id>")
 def report(file_id):
@@ -385,7 +446,13 @@ def report(file_id):
 
     story = []
 
-    story.append(Paragraph("<b>File Integrity Monitoring Report</b>", styles['Title']))
+    story.append(
+        Paragraph(
+            "<b>File Integrity Monitoring Report</b>",
+            styles['Title']
+        )
+    )
+
     story.append(Spacer(1, 20))
 
     fields = [
@@ -400,7 +467,11 @@ def report(file_id):
     ]
 
     for item in fields:
-        story.append(Paragraph(item, styles['BodyText']))
+
+        story.append(
+            Paragraph(item, styles['BodyText'])
+        )
+
         story.append(Spacer(1, 10))
 
     drawing = Drawing(400, 200)
@@ -438,5 +509,10 @@ def logout():
 
     return redirect("/")
 
+# ================= MAIN =================
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0",port=5000)
+
+    port = int(os.environ.get("PORT", 5000))
+
+    app.run(host="0.0.0.0", port=port)
