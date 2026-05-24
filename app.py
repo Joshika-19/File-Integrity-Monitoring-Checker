@@ -16,6 +16,7 @@ import hashlib
 import shutil
 import smtplib
 import pytz
+import resend
 from datetime import datetime
 
 from email.mime.text import MIMEText
@@ -146,48 +147,25 @@ def security_score(changes):
     return 10, "Critical"
 
 # ================= EMAIL (FIXED FOR RENDER SAFE EXECUTION) =================
+
+resend.api_key = os.getenv("RESEND_API_KEY")
+
 def send_email(receiver, filename, upload_time, modified_time):
 
-    sender = os.getenv("MAIL_USERNAME")
-    password = os.getenv("MAIL_PASSWORD")
-
-    print("DEBUG EMAIL TRIGGERED")  # 👈 MUST appear in logs
-
-    if not sender or not password:
-        print("EMAIL CONFIG MISSING")
-        return
-
-    body = f"""
-Warning: File integrity violation detected
-
-File Name: {filename}
-Upload Time: {upload_time}
-Modified Time: {modified_time}
-User: {receiver}
-"""
-
-    msg = MIMEText(body)
-    msg["Subject"] = "File Integrity Alert"
-    msg["From"] = sender
-    msg["To"] = receiver
-
     try:
-        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
+        response = resend.Emails.send({
+            "from": os.getenv("EMAIL_FROM"),
+            "to": receiver,
+            "subject": "File Integrity Alert",
+            "html": f"""
+                <h2>File Integrity Warning</h2>
+                <p><b>File:</b> {filename}</p>
+                <p><b>Upload Time:</b> {upload_time}</p>
+                <p><b>Modified Time:</b> {modified_time}</p>
+            """
+        })
 
-        print("Logging into SMTP...")
-
-        server.login(sender, password)
-
-        print("Login success, sending mail...")
-
-        server.sendmail(sender, receiver, msg.as_string())
-
-        server.quit()
-
-        print("EMAIL SENT SUCCESSFULLY")
+        print("EMAIL SENT SUCCESS:", response)
 
     except Exception as e:
         print("EMAIL FAILED:", str(e))
