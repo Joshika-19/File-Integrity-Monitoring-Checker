@@ -15,27 +15,26 @@ import os
 import hashlib
 import shutil
 import smtplib
-
-from email.mime.text import MIMEText
+import pytz
 from datetime import datetime
 
-import pytz
+from email.mime.text import MIMEText
 
 # ================= LOAD ENV =================
-
 load_dotenv()
 
 # ================= APP =================
-
 app = Flask(__name__)
 
-app.secret_key = os.getenv("SECRET_KEY")
+app.secret_key = os.getenv("SECRET_KEY", "dev_secret")
 
 app.config["SESSION_TYPE"] = "filesystem"
 Session(app)
 
-# ================= FOLDERS =================
+# ================= IMPORTANT FOR RENDER =================
+PORT = int(os.environ.get("PORT", 5000))
 
+# ================= FOLDERS =================
 UPLOAD_FOLDER = "uploads"
 ORIGINAL_FOLDER = "original_files"
 REPORT_FOLDER = "reports"
@@ -47,7 +46,6 @@ os.makedirs(ORIGINAL_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)
 
 # ================= GOOGLE LOGIN =================
-
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 google_bp = make_google_blueprint(
@@ -64,9 +62,7 @@ google_bp = make_google_blueprint(
 app.register_blueprint(google_bp, url_prefix="/login")
 
 # ================= DATABASE =================
-
 def init_db():
-
     conn = sqlite3.connect("database.db")
     cur = conn.cursor()
 
@@ -91,48 +87,38 @@ def init_db():
 init_db()
 
 # ================= TIME =================
-
 def indian_time():
-
     tz = pytz.timezone("Asia/Kolkata")
-
     return datetime.now(tz).strftime("%d-%m-%Y %H:%M:%S")
 
 # ================= HASH =================
-
 def sha256(filepath):
-
     h = hashlib.sha256()
 
     with open(filepath, "rb") as file:
-
         while True:
-
             chunk = file.read(4096)
-
             if not chunk:
                 break
-
             h.update(chunk)
 
     return h.hexdigest()
 
 # ================= CHANGE DETECTION =================
-
 def detect_changes(old_file, new_file):
+    try:
+        with open(old_file, "r", errors="ignore") as f1:
+            old_lines = f1.readlines()
 
-    with open(old_file, "r", errors="ignore") as f1:
-        old_lines = f1.readlines()
-
-    with open(new_file, "r", errors="ignore") as f2:
-        new_lines = f2.readlines()
+        with open(new_file, "r", errors="ignore") as f2:
+            new_lines = f2.readlines()
+    except Exception:
+        return "Binary or unreadable file"
 
     changed_lines = []
-
     max_len = max(len(old_lines), len(new_lines))
 
     for i in range(max_len):
-
         old = old_lines[i].strip() if i < len(old_lines) else ""
         new = new_lines[i].strip() if i < len(new_lines) else ""
 
@@ -148,93 +134,71 @@ def detect_changes(old_file, new_file):
     return "Lines Changed: " + ", ".join(map(str, changed_lines))
 
 # ================= SECURITY SCORE =================
-
 def security_score(changes):
-
     count = len(changes.split(","))
 
     if count == 0:
         return 100, "Low"
-
     elif count <= 3:
         return 70, "Medium"
-
     elif count <= 7:
         return 40, "High"
-
     return 10, "Critical"
 
-# ================= EMAIL =================
-
+# ================= EMAIL (FIXED FOR RENDER SAFE EXECUTION) =================
 def send_email(receiver, filename, upload_time, modified_time):
 
     sender = os.getenv("MAIL_USERNAME")
     password = os.getenv("MAIL_PASSWORD")
 
+    if not sender or not password:
+        print("Email credentials missing")
+        return
+
     body = f"""
 Warning: File integrity violation detected
 
 File Name: {filename}
-
 Upload Time: {upload_time}
-
 Modified Time: {modified_time}
-
 User: {receiver}
 """
 
     msg = MIMEText(body)
-
     msg["Subject"] = "File Integrity Alert"
     msg["From"] = sender
     msg["To"] = receiver
 
     try:
-
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
         server.starttls()
-
         server.login(sender, password)
-
         server.sendmail(sender, receiver, msg.as_string())
-
         server.quit()
 
         print("Email sent successfully")
 
     except Exception as e:
-
         print("Email Error:", str(e))
 
-# ================= HOME =================
-
+# ================= ROUTES =================
 @app.route("/")
 def home():
-
     return render_template("login.html")
-
-# ================= GOOGLE LOGIN =================
 
 @app.route("/google_login")
 def google_login():
-
     if not google.authorized:
         return redirect(url_for("google.login"))
 
     resp = google.get("/oauth2/v2/userinfo")
-
     info = resp.json()
 
     session["email"] = info["email"]
-
     return redirect("/dashboard")
-
-# ================= DASHBOARD =================
 
 @app.route("/dashboard")
 def dashboard():
-
     if "email" not in session:
         return redirect("/")
 
@@ -242,18 +206,11 @@ def dashboard():
     cur = conn.cursor()
 
     cur.execute("SELECT * FROM file_history ORDER BY id DESC")
-
     data = cur.fetchall()
 
     conn.close()
 
-    return render_template(
-        "dashboard.html",
-        email=session["email"],
-        history=data
-    )
-
-# ================= UPLOAD =================
+    return render_template("dashboard.html", email=session["email"], history=data)
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -261,35 +218,16 @@ def upload():
     if "email" not in session:
         return redirect("/")
 
-    if "file" not in request.files:
+    file = request.files.get("file")
 
+    if not file or file.filename == "":
         flash("No file uploaded")
-
-        return redirect("/dashboard")
-
-    file = request.files["file"]
-
-    if file.filename == "":
-
-        flash("No selected file")
-
         return redirect("/dashboard")
 
     filename = secure_filename(file.filename)
-
     upload_path = os.path.join(UPLOAD_FOLDER, filename)
 
-    try:
-
-        file.save(upload_path)
-
-    except Exception as e:
-
-        flash("File upload failed")
-
-        print("Upload Error:", str(e))
-
-        return redirect("/dashboard")
+    file.save(upload_path)
 
     current_hash = sha256(upload_path)
 
@@ -302,7 +240,6 @@ def upload():
     )
 
     existing = cur.fetchone()
-
     upload_time = indian_time()
 
     if existing is None:
@@ -310,22 +247,13 @@ def upload():
         shutil.copy(upload_path, os.path.join(ORIGINAL_FOLDER, filename))
 
         cur.execute("""
-            INSERT INTO file_history
-            (filename, upload_time, modified_time, status, hash, score, risk, changes, user_email)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO file_history VALUES (NULL,?,?,?,?,?,?,?,?,?)
         """, (
-            filename,
-            upload_time,
-            "-",
-            "Original",
-            current_hash,
-            100,
-            "Low",
-            "No changes",
-            session["email"]
+            filename, upload_time, "-", "Original",
+            current_hash, 100, "Low", "No changes", session["email"]
         ))
 
-        flash("Original file uploaded successfully")
+        flash("Original file uploaded")
 
     else:
 
@@ -334,34 +262,18 @@ def upload():
         if old_hash != current_hash:
 
             original = os.path.join(ORIGINAL_FOLDER, filename)
-
             changes = detect_changes(original, upload_path)
-
             score, risk = security_score(changes)
-
             modified_time = indian_time()
 
-            send_email(
-                session["email"],
-                filename,
-                existing[2],
-                modified_time
-            )
+            # SAFE EMAIL CALL (won’t crash app)
+            send_email(session["email"], filename, existing[2], modified_time)
 
             cur.execute("""
-                INSERT INTO file_history
-                (filename, upload_time, modified_time, status, hash, score, risk, changes, user_email)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO file_history VALUES (NULL,?,?,?,?,?,?,?,?,?)
             """, (
-                filename,
-                existing[2],
-                modified_time,
-                "Modified",
-                current_hash,
-                score,
-                risk,
-                changes,
-                session["email"]
+                filename, existing[2], modified_time, "Modified",
+                current_hash, score, risk, changes, session["email"]
             ))
 
             flash("Modified file detected")
@@ -369,19 +281,10 @@ def upload():
         else:
 
             cur.execute("""
-                INSERT INTO file_history
-                (filename, upload_time, modified_time, status, hash, score, risk, changes, user_email)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO file_history VALUES (NULL,?,?,?,?,?,?,?,?,?)
             """, (
-                filename,
-                upload_time,
-                "-",
-                "Unchanged",
-                current_hash,
-                100,
-                "Low",
-                "No changes",
-                session["email"]
+                filename, upload_time, "-", "Unchanged",
+                current_hash, 100, "Low", "No changes", session["email"]
             ))
 
             flash("File unchanged")
@@ -391,128 +294,69 @@ def upload():
 
     return redirect("/dashboard")
 
-# ================= RESTORE =================
-
 @app.route("/restore/<filename>")
 def restore(filename):
 
-    original = os.path.join(ORIGINAL_FOLDER, filename)
-    upload = os.path.join(UPLOAD_FOLDER, filename)
+    shutil.copy(
+        os.path.join(ORIGINAL_FOLDER, filename),
+        os.path.join(UPLOAD_FOLDER, filename)
+    )
 
-    shutil.copy(original, upload)
-
-    flash("Original file restored successfully")
-
+    flash("Restored successfully")
     return redirect("/dashboard")
-
-# ================= CLEAR =================
 
 @app.route("/clear")
 def clear():
 
     conn = sqlite3.connect("database.db")
     cur = conn.cursor()
-
     cur.execute("DELETE FROM file_history")
-
     conn.commit()
     conn.close()
 
-    flash("History Cleared")
-
+    flash("History cleared")
     return redirect("/dashboard")
-
-# ================= PDF REPORT =================
 
 @app.route("/report/<int:file_id>")
 def report(file_id):
 
     conn = sqlite3.connect("database.db")
     cur = conn.cursor()
-
     cur.execute("SELECT * FROM file_history WHERE id=?", (file_id,))
-
     row = cur.fetchone()
-
     conn.close()
 
-    filename = f"report_{file_id}.pdf"
-
-    path = os.path.join(REPORT_FOLDER, filename)
+    path = os.path.join(REPORT_FOLDER, f"report_{file_id}.pdf")
 
     doc = SimpleDocTemplate(path)
-
     styles = getSampleStyleSheet()
-
     story = []
 
-    story.append(
-        Paragraph(
-            "<b>File Integrity Monitoring Report</b>",
-            styles['Title']
-        )
-    )
-
+    story.append(Paragraph("File Integrity Report", styles['Title']))
     story.append(Spacer(1, 20))
 
-    fields = [
-        f"File Name: {row[1]}",
-        f"Upload Time: {row[2]}",
-        f"Modified Time: {row[3]}",
+    for item in [
+        f"File: {row[1]}",
+        f"Upload: {row[2]}",
+        f"Modified: {row[3]}",
         f"Status: {row[4]}",
-        f"Security Score: {row[6]}",
-        f"Risk Level: {row[7]}",
-        f"User Email: {row[9]}",
+        f"Score: {row[6]}",
+        f"Risk: {row[7]}",
+        f"Email: {row[9]}",
         f"Changes: {row[8]}"
-    ]
-
-    for item in fields:
-
-        story.append(
-            Paragraph(item, styles['BodyText'])
-        )
-
+    ]:
+        story.append(Paragraph(item, styles['BodyText']))
         story.append(Spacer(1, 10))
-
-    drawing = Drawing(400, 200)
-
-    chart = VerticalBarChart()
-
-    chart.x = 50
-    chart.y = 50
-    chart.height = 125
-    chart.width = 300
-
-    chart.data = [[row[6]]]
-
-    chart.categoryAxis.categoryNames = ["Risk Score"]
-
-    drawing.add(chart)
-
-    story.append(drawing)
 
     doc.build(story)
 
     return send_file(path, as_attachment=True)
 
-# ================= LOGOUT =================
-
 @app.route("/logout")
 def logout():
-
     session.clear()
-
-    try:
-        del google_bp.token
-    except:
-        pass
-
     return redirect("/")
 
-# ================= MAIN =================
-
+# ================= RENDER SAFE START =================
 if __name__ == "__main__":
-
-    port = int(os.environ.get("PORT", 5000))
-
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=PORT)
