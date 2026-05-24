@@ -151,8 +151,10 @@ def send_email(receiver, filename, upload_time, modified_time):
     sender = os.getenv("MAIL_USERNAME")
     password = os.getenv("MAIL_PASSWORD")
 
+    print("DEBUG EMAIL TRIGGERED")  # 👈 MUST appear in logs
+
     if not sender or not password:
-        print("Email credentials missing")
+        print("EMAIL CONFIG MISSING")
         return
 
     body = f"""
@@ -171,16 +173,24 @@ User: {receiver}
 
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
+        server.ehlo()
         server.starttls()
+        server.ehlo()
+
+        print("Logging into SMTP...")
+
         server.login(sender, password)
+
+        print("Login success, sending mail...")
+
         server.sendmail(sender, receiver, msg.as_string())
+
         server.quit()
 
-        print("Email sent successfully")
+        print("EMAIL SENT SUCCESSFULLY")
 
     except Exception as e:
-        print("Email Error:", str(e))
-
+        print("EMAIL FAILED:", str(e))
 # ================= ROUTES =================
 @app.route("/")
 def home():
