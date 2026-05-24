@@ -153,19 +153,19 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 def send_email(receiver, filename, upload_time, modified_time):
 
     try:
-        response = resend.Emails.send({
-            "from": os.getenv("EMAIL_FROM"),
+        resend.Emails.send({
+            "from": "onboarding@resend.dev",
             "to": receiver,
             "subject": "File Integrity Alert",
             "html": f"""
-                <h2>File Integrity Warning</h2>
+                <h2>File Modified Alert</h2>
                 <p><b>File:</b> {filename}</p>
                 <p><b>Upload Time:</b> {upload_time}</p>
                 <p><b>Modified Time:</b> {modified_time}</p>
             """
         })
 
-        print("EMAIL SENT SUCCESS:", response)
+        print("EMAIL SENT SUCCESS")
 
     except Exception as e:
         print("EMAIL FAILED:", str(e))
